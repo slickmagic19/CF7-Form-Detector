@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CF7 Form Detector &middot; Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <img src="../../icons/icon48.png" alt="" width="40" height="40">
+      <div>
+        <h1>CF7 Form Detector</h1>
+        <p>Options</p>
+      </div>
+    </header>
+
+    <form id="options-form" class="card" novalidate>
+      <section class="field">
+        <label for="adminBaseOverride">WordPress admin URL</label>
+        <input
+          id="adminBaseOverride"
+          name="adminBaseOverride"
+          type="text"
+          inputmode="url"
+          placeholder="Auto-detect (recommended)"
+          autocomplete="off"
+          spellcheck="false"
+        >
+        <p class="hint">
+          Leave empty to auto-detect from the page. Set this only when the detected admin URL is wrong.
+          Examples: <code>/wp/wp-admin/</code> or <code>https://example.com/wp/wp-admin/</code>
+        </p>
+      </section>
+
+      <section class="field">
+        <label>Prefill values</label>
+        <div class="grid-2">
+          <div>
+            <label for="prefillFirstName">First name</label>
+            <input id="prefillFirstName" name="prefillFirstName" type="text" autocomplete="off">
+          </div>
+          <div>
+            <label for="prefillLastName">Last name</label>
+            <input id="prefillLastName" name="prefillLastName" type="text" autocomplete="off">
+          </div>
+          <div>
+            <label for="prefillEmail">Email</label>
+            <input id="prefillEmail" name="prefillEmail" type="email" autocomplete="off">
+          </div>
+          <div>
+            <label for="prefillPhone">Phone</label>
+            <input id="prefillPhone" name="prefillPhone" type="tel" autocomplete="off">
+          </div>
+        </div>
+        <label for="prefillMessage">Message</label>
+        <textarea id="prefillMessage" name="prefillMessage" rows="3"></textarea>
+        <p class="hint">Used by the Fill buttons and optional auto-fill.</p>
+      </section>
+
+      <section class="field row">
+        <div class="field-copy">
+          <label for="showFloatingBadge">Show floating CF7 badge on pages</label>
+          <p class="hint">Adds a small badge to pages that contain Contact Form 7 forms.</p>
+        </div>
+        <input id="showFloatingBadge" name="showFloatingBadge" type="checkbox" class="switch">
+      </section>
+
+      <section class="field row">
+        <div class="field-copy">
+          <label for="openLinksInNewTab">Open admin links in a new tab</label>
+          <p class="hint">When off, admin links open in the current tab.</p>
+        </div>
+        <input id="openLinksInNewTab" name="openLinksInNewTab" type="checkbox" class="switch">
+      </section>
+
+      <section class="field row">
+        <div class="field-copy">
+          <label for="fetchFormTitles">Look up real form titles</label>
+          <p class="hint">
+            Uses the site's Contact Form 7 REST API to read the title configured in WordPress.
+            Requires you to be logged in with permission to edit forms; otherwise nearby headings are used.
+          </p>
+        </div>
+        <input id="fetchFormTitles" name="fetchFormTitles" type="checkbox" class="switch">
+      </section>
+
+      <section class="field row">
+        <div class="field-copy">
+          <label for="prefillEnabled">Enable prefill</label>
+          <p class="hint">Shows Fill buttons in the popup and floating panel.</p>
+        </div>
+        <input id="prefillEnabled" name="prefillEnabled" type="checkbox" class="switch">
+      </section>
+
+      <section class="field row">
+        <div class="field-copy">
+          <label for="autoFill">Auto-fill forms on page load</label>
+          <p class="hint">
+            Fills each form once when it appears. Use with care on live sites; it overwrites empty fields.
+          </p>
+        </div>
+        <input id="autoFill" name="autoFill" type="checkbox" class="switch">
+      </section>
+
+      <div class="actions">
+        <button type="submit" class="btn primary">Save</button>
+        <button type="button" id="reset" class="btn ghost">Reset defaults</button>
+        <span id="status" class="status" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+
+    <section class="card info">
+      <h2>How Bedrock detection works</h2>
+      <p>
+        Bedrock serves WordPress core from a subdirectory and content from <code>/app/</code>.
+        This extension reads asset paths such as <code>/app/themes/&hellip;</code> and
+        <code>/wp/wp-includes/&hellip;</code>, then builds the admin URL as
+        <code>&lt;core&gt;wp-admin/admin.php?page=wpcf7&amp;post=ID&amp;action=edit</code>.
+      </p>
+      <p>
+        For a default Bedrock install the core path is <code>/wp/</code>, so form links point to
+        <code>https://example.com/wp/wp-admin/&hellip;</code>. If your install uses a custom path,
+        set the admin URL above.
+      </p>
+      <p>
+        Form names come from the Contact Form 7 REST API when you are logged in with permission to
+        edit forms. Otherwise the extension falls back to a nearby heading, a custom
+        <code>aria-label</code>, or the form ID.
+      </p>
+    </section>
+  </main>
+
+  <script src="../shared/settings.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
