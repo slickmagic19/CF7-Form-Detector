@@ -134,9 +134,10 @@
     if (els.formList) {
       els.formList.textContent = '';
 
-      forms.forEach(function (form) {
+      forms.forEach(function (form, index) {
         var li = document.createElement('li');
         li.className = 'form-item';
+        li.style.setProperty('--i', String(index));
 
         var main = document.createElement('div');
         main.className = 'form-main';

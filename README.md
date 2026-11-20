@@ -71,14 +71,35 @@ For a default Bedrock install this becomes:
 https://example.com/wp/wp-admin/admin.php?page=wpcf7&post=123&action=edit
 ```
 
+## Design system
+
+The interface uses a design language adapted from Meta's [Astryx](https://github.com/meta/astryx) **Neutral** theme:
+
+- **Typography:** Figtree (bundled locally) with a system-font fallback.
+- **Surfaces:** quiet grayscale canvas (`#f1f1f1`) with white/dark cards and subtle borders.
+- **Accent:** near-black in light mode, near-white in dark mode, with blue reserved for information states.
+- **Semantic color:** success, warning, and error fills used only for their meanings.
+- **Geometry:** 4px inner / 10px element / 12px container radii, pill controls.
+- **Elevation:** soft low/med/high shadows, with a 1px light rim in dark mode.
+- **Motion:** Astryx fast (175ms) / medium (410ms) durations, `cubic-bezier(0.24, 1, 0.4, 1)` standard easing, `cubic-bezier(0.3, 0, 0.6, 0.6)` exit easing.
+- **Press feedback:** hover/press overlay fades over 175ms, with instant press-in and a 0.97–0.98 press scale.
+- **Entrances:** popover scales/fades in over 175ms; popup list items stagger 30ms; toasts and the options page fade in.
+- **Reduced motion:** all animations/transitions collapse when `prefers-reduced-motion: reduce` is set.
+
+Figtree is bundled under the SIL Open Font License — see `fonts/figtree.LICENSE.txt`.
+
 ## Project structure
 
 ```
 CF7-Form-Detector/
 ├── manifest.json
 ├── icons/                  # 16/32/48/128 px icons
+├── fonts/                  # Figtree woff2 + license
 └── src/
-    ├── shared/settings.js  # Default settings + storage helpers
+    ├── shared/
+    │   ├── settings.js     # Default settings + storage helpers
+    │   ├── tokens.css      # Astryx-derived design tokens
+    │   └── fonts.css       # Figtree @font-face
     ├── content/content.js  # Detection, admin URLs, floating widget, prefill
     ├── popup/              # Popup dashboard
     └── options/            # Options page
