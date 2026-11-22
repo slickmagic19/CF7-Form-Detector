@@ -12,7 +12,9 @@
     prefillLastName: "Agent Image Test",
     prefillEmail: "developers@agentimage.com",
     prefillPhone: "1.800.979.5799",
-    prefillMessage: "This is a message from Agent Image. We're just checking for possible errors. A response is not needed. Thanks!"
+    prefillMessage: "This is a message from Agent Image. We're just checking for possible errors. A response is not needed. Thanks!",
+    mailBuilderEnabled: true,
+    mailBuilderTargets: "both"
   };
 
   function getArea() {

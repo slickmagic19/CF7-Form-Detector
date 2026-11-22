@@ -7,7 +7,9 @@
   var DEFAULTS = window.CF7_DEFAULTS || {
     showFloatingBadge: true,
     openLinksInNewTab: true,
-    adminBaseOverride: ''
+    adminBaseOverride: '',
+    mailBuilderEnabled: true,
+    mailBuilderTargets: 'both'
   };
 
   var MAX_ASSET_PATHS = 700;
@@ -28,7 +30,12 @@
     titleRequests: Object.create(null),
     autoFilled: new WeakSet(),
     pillDismissed: false,
-    hostVisible: false
+    hostVisible: false,
+    adminMode: false,
+    mailBuilderEntries: [],
+    mailBuilderListening: false,
+    mailBuilderObserver: null,
+    mailBuilderRepositionTimer: null
   };
 
   var scanTimer = null;
@@ -1289,6 +1296,576 @@ var FONT_BASE = '';
   }
 
   /* ------------------------------------------------------------------ */
+  /* CF7 admin mail builder                                             */
+  /* ------------------------------------------------------------------ */
+
+  var MAIL_BODY_IDS = ['wpcf7-mail-body', 'wpcf7-mail-2-body'];
+  var MAIL_BUILDER_HOST_PREFIX = 'cf7-mb-host-';
+
+  function isCf7AdminScreen() {
+    if (!document.getElementById('wpcf7-form')) return false;
+    for (var i = 0; i < MAIL_BODY_IDS.length; i++) {
+      if (document.getElementById(MAIL_BODY_IDS[i])) return true;
+    }
+    return false;
+  }
+
+  function adminMailTargets() {
+    var targets = String(state.settings.mailBuilderTargets || 'both');
+    var ids = [];
+    if (targets === 'both' || targets === 'mail') ids.push('wpcf7-mail-body');
+    if (targets === 'both' || targets === 'mail2') ids.push('wpcf7-mail-2-body');
+
+    var out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var el = document.getElementById(ids[i]);
+      if (el) out.push(el);
+    }
+    return out;
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  var HUMANIZE_ACRONYMS = {
+    url: 'URL',
+    uri: 'URI',
+    id: 'ID',
+    seo: 'SEO',
+    faq: 'FAQ',
+    api: 'API',
+    sms: 'SMS',
+    mms: 'MMS',
+    pdf: 'PDF',
+    csv: 'CSV'
+  };
+
+  var HUMANIZE_ABBREV = {
+    fname: 'first name',
+    lname: 'last name',
+    mname: 'middle name',
+    tel: 'phone',
+    msg: 'message',
+    dob: 'date of birth',
+    addr: 'address'
+  };
+
+  function humanizeTagName(name) {
+    var raw = String(name || '').trim();
+    if (!raw) return '';
+
+    raw = raw.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+    raw = raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+
+    var words = raw.split(' ');
+    var out = [];
+
+    for (var i = 0; i < words.length; i++) {
+      var word = words[i];
+      if (!word) continue;
+
+      var lower = word.toLowerCase();
+
+      if (HUMANIZE_ACRONYMS[lower]) {
+        out.push(HUMANIZE_ACRONYMS[lower]);
+      } else if (HUMANIZE_ABBREV[lower]) {
+        var expanded = HUMANIZE_ABBREV[lower];
+        out.push(i === 0 ? expanded.charAt(0).toUpperCase() + expanded.slice(1) : expanded);
+      } else if (i === 0) {
+        out.push(lower.charAt(0).toUpperCase() + lower.slice(1));
+      } else {
+        out.push(lower);
+      }
+    }
+
+    return out.join(' ');
+  }
+
+  function cleanLabel(text) {
+    var value = String(text || '');
+    value = value.replace(/\[[^\[\]]*\]/g, ' ');
+    value = value.replace(/\((?:required|optional)\)/gi, ' ');
+    value = value.replace(/\s+/g, ' ').replace(/\s*[:*]\s*$/, '').trim();
+    if (value.length > 80) value = value.slice(0, 77).trim() + '\u2026';
+    return value;
+  }
+
+  function parseFormTag(inner) {
+    var tokens = String(inner || '').trim().split(/\s+/);
+    if (tokens.length < 2) return { type: '', name: '' };
+
+    var type = tokens[0].replace(/\*$/, '');
+    if (!/^[a-z][a-z0-9_-]*$/i.test(type)) return { type: '', name: '' };
+
+    for (var i = 1; i < tokens.length; i++) {
+      var token = tokens[i];
+      if (!token) continue;
+      if (token.charAt(0) === '"' || token.indexOf(':') !== -1) break;
+      if (/^[A-Za-z0-9_-]+$/.test(token)) return { type: type, name: token };
+      break;
+    }
+    return { type: type, name: '' };
+  }
+
+  function collectTemplateFields(templateHtml) {
+    var out = [];
+    if (!templateHtml || typeof DOMParser === 'undefined') return out;
+
+    var doc;
+    try {
+      doc = new DOMParser().parseFromString(String(templateHtml), 'text/html');
+    } catch (err) {
+      return out;
+    }
+    if (!doc || !doc.body) return out;
+
+    var seen = Object.create(null);
+    var walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null, false);
+    var textNode;
+
+    while ((textNode = walker.nextNode())) {
+      var text = textNode.nodeValue || '';
+      var re = /\[([^\[\]]+)\]/g;
+      var match;
+
+      while ((match = re.exec(text)) !== null) {
+        var parsed = parseFormTag(match[1]);
+        var name = parsed.name;
+        if (!name || seen[name]) continue;
+        seen[name] = true;
+
+        var element = textNode.parentElement;
+        var label = '';
+
+        var labelEl = element && element.closest ? element.closest('label') : null;
+        if (labelEl) {
+          label = cleanLabel(labelEl.textContent);
+        }
+
+        if (!label && element && element.closest) {
+          var block = element.closest('p,div,li,td,th,section,span');
+          if (block) {
+            var full = block.textContent || '';
+            var tagCount = (full.match(/\[/g) || []).length;
+            if (tagCount === 1) {
+              var needle = '[' + match[1] + ']';
+              var idx = full.indexOf(needle);
+              var before = idx > -1 ? full.slice(0, idx) : '';
+              var lines = before.split(/\r|\n/);
+              var lastLine = '';
+              for (var li = lines.length - 1; li >= 0; li--) {
+                if (lines[li].trim()) {
+                  lastLine = lines[li];
+                  break;
+                }
+              }
+              label = cleanLabel(lastLine);
+            }
+          }
+        }
+
+        out.push({ name: name, type: parsed.type, label: label });
+      }
+    }
+
+    return out;
+  }
+
+  var MAIL_TAG_EXCLUDED_TYPES = {
+    acceptance: true,
+    captchac: true,
+    captchar: true,
+    quiz: true,
+    count: true
+  };
+
+  function getAvailableMailTags() {
+    var templateEl = document.getElementById('wpcf7-form');
+    var template = templateEl ? templateEl.value : '';
+    var fields = collectTemplateFields(template);
+
+    var tags = [];
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i];
+      if (!field.name) continue;
+      if (MAIL_TAG_EXCLUDED_TYPES[String(field.type || '').toLowerCase()]) continue;
+      if (tags.indexOf(field.name) === -1) tags.push(field.name);
+    }
+
+    if (tags.length > 0) return tags;
+
+    var legend =
+      document.querySelector('#wpcf7-mail legend') ||
+      document.querySelector('#wpcf7-mail-2 legend');
+    if (!legend) return [];
+
+    var spans = legend.querySelectorAll('.mailtag');
+    var fallback = [];
+    for (var j = 0; j < spans.length; j++) {
+      var raw = spans[j].textContent || '';
+      var tag = raw.replace(/[\[\]]/g, '').trim();
+      if (tag && fallback.indexOf(tag) === -1) fallback.push(tag);
+    }
+    return fallback;
+  }
+
+  function buildMailBodyHtml(tags) {
+    var templateEl = document.getElementById('wpcf7-form');
+    var template = templateEl ? templateEl.value : '';
+    var fields = collectTemplateFields(template);
+
+    var labelMap = Object.create(null);
+    fields.forEach(function (field) {
+      labelMap[field.name] = field.label;
+    });
+
+    var usedLabels = Object.create(null);
+    var rows = [];
+
+    (tags || []).forEach(function (tag) {
+      var label = labelMap[tag] || '';
+      if (!label || usedLabels[label]) {
+        label = humanizeTagName(tag) || label || tag;
+      }
+      usedLabels[label] = true;
+      rows.push({ label: label, tags: [tag] });
+    });
+
+    rows.push({ label: 'Page URL', tags: ['_url'] });
+
+    var bodyRows = rows
+      .map(function (row) {
+        var label = escapeHtml(row.label);
+        var tagHtml = row.tags
+          .map(function (tag) {
+            return '[' + escapeHtml(tag) + ']';
+          })
+          .join(' ');
+        return (
+          '\t<tr>\n\t\t<td width="200"><strong>' +
+          label +
+          ':</strong></td>\n\t\t<td>' +
+          tagHtml +
+          '</td>\n\t</tr>'
+        );
+      })
+      .join('\n');
+
+    var table =
+      '<table width="600" border="0" cellspacing="0" cellpadding="0">\n' +
+      bodyRows +
+      '\n</table>';
+    var footer =
+      '<p>This is a notification that a contact form was submitted on your website ([_site_title] [_site_url]).</p>';
+
+    return table + '\n\n' + footer;
+  }
+
+  function setMailBodyValue(textarea, value) {
+    if (!textarea) return;
+    textarea.value = value;
+    try {
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  function tickMailUseHtml(textarea) {
+    var id =
+      textarea && textarea.id === 'wpcf7-mail-2-body'
+        ? 'wpcf7-mail-2-use-html'
+        : 'wpcf7-mail-use-html';
+    var checkbox = document.getElementById(id);
+    if (!checkbox || checkbox.checked) return;
+    checkbox.checked = true;
+    try {
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  var MAIL_BUILDER_CSS = [
+    FONT_FACES,
+    ':host { all: initial; ' + LIGHT_TOKENS + ' }',
+    '@media (prefers-color-scheme: dark) { :host { ' + DARK_TOKENS + ' } }',
+    '*, *::before, *::after { box-sizing: border-box; }',
+    '.cf7-mb { display: inline-flex; align-items: center; font-family: var(--font-sans); }',
+    '.cf7-mb button { position: relative; overflow: hidden; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 26px; padding: 6px 11px; border: 1px solid var(--color-border-emphasized); border-radius: var(--radius-inner); background: var(--color-background-card); color: var(--color-text-primary); font-family: var(--font-sans); font-size: 11px; font-weight: 600; line-height: 1.2; white-space: nowrap; cursor: pointer; box-shadow: var(--shadow-med); transition: background var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard); }',
+    '.cf7-mb button:hover { border-color: var(--color-accent); }',
+    '.cf7-mb button::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--color-overlay-hover); opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); pointer-events: none; z-index: -1; }',
+    '.cf7-mb button:hover::before { opacity: 1; }',
+    '.cf7-mb button:active { transform: scale(0.97); }',
+    '.cf7-mb button:active::before { background: var(--color-overlay-pressed); opacity: 1; transition-duration: 0ms; }',
+    '.cf7-mb button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }',
+    '.cf7-mb .cf7-mb-icon { display: inline-flex; flex: none; width: 13px; height: 13px; }',
+    '.cf7-mb .cf7-mb-icon svg { display: block; width: 13px; height: 13px; }',
+    '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }'
+  ].join('\n');
+
+  function createMailBuilderEntry(textarea) {
+    if (!textarea) return null;
+
+    var host = document.createElement('div');
+    host.id = MAIL_BUILDER_HOST_PREFIX + textarea.id;
+
+    var shadow = host.attachShadow({ mode: 'open' });
+
+    if (typeof CSSStyleSheet !== 'undefined' && 'adoptedStyleSheets' in shadow) {
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync(MAIL_BUILDER_CSS);
+      shadow.adoptedStyleSheets = [sheet];
+    } else {
+      var style = document.createElement('style');
+      style.textContent = MAIL_BUILDER_CSS;
+      shadow.appendChild(style);
+    }
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cf7-mb';
+
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Build mail table from available mail-tags');
+    button.title = 'Build mail table from available mail-tags';
+
+    var icon = document.createElement('span');
+    icon.className = 'cf7-mb-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML =
+      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"></rect>' +
+      '<path d="M1.75 6.5h12.5M6.25 6.5v6.75"></path></svg>';
+
+    var label = document.createElement('span');
+    label.textContent = 'Build mail table';
+
+    button.appendChild(icon);
+    button.appendChild(label);
+    wrap.appendChild(button);
+    shadow.appendChild(wrap);
+
+    var flashTimer = null;
+    var originalLabel = label.textContent;
+
+    button.addEventListener('click', function () {
+      var tags = getAvailableMailTags();
+      if (!tags.length) {
+        label.textContent = 'No mail tags';
+        if (flashTimer) clearTimeout(flashTimer);
+        flashTimer = setTimeout(function () {
+          label.textContent = originalLabel;
+        }, 1600);
+        return;
+      }
+
+      setMailBodyValue(textarea, buildMailBodyHtml(tags));
+      tickMailUseHtml(textarea);
+
+      label.textContent = 'Built';
+      if (flashTimer) clearTimeout(flashTimer);
+      flashTimer = setTimeout(function () {
+        label.textContent = originalLabel;
+      }, 1400);
+    });
+
+    var cell = textarea.closest ? textarea.closest('td') : null;
+    var anchored = false;
+    var cellPositionChanged = false;
+    var previousCellPosition = '';
+
+    if (cell && cell.style) {
+      previousCellPosition = cell.style.position || '';
+      if (!previousCellPosition) {
+        cell.style.position = 'relative';
+        cellPositionChanged = true;
+      }
+      host.style.cssText =
+        'position:absolute;top:6px;right:10px;z-index:60;margin:0;padding:0;border:0;background:transparent;display:inline-flex;';
+      cell.appendChild(host);
+      anchored = true;
+    } else {
+      host.style.cssText =
+        'position:fixed;z-index:2147483647;top:0;left:0;margin:0;padding:0;border:0;background:transparent;display:none;';
+      (document.body || document.documentElement).appendChild(host);
+    }
+
+    var entry = {
+      textarea: textarea,
+      host: host,
+      shadow: shadow,
+      button: button,
+      anchored: anchored,
+      cell: anchored ? cell : null,
+      cellPositionChanged: cellPositionChanged,
+      previousCellPosition: previousCellPosition,
+      observer: null
+    };
+
+    if (anchored) {
+      positionAnchoredMailBuilderEntry(entry);
+    } else {
+      positionMailBuilderEntry(entry);
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      try {
+        var observed = anchored ? cell : textarea;
+        if (observed) {
+          entry.observer = new ResizeObserver(function () {
+            if (entry.anchored) {
+              positionAnchoredMailBuilderEntry(entry);
+            } else {
+              positionMailBuilderEntry(entry);
+            }
+          });
+          entry.observer.observe(observed);
+        }
+      } catch (err) {
+        entry.observer = null;
+      }
+    }
+
+    return entry;
+  }
+
+  function positionAnchoredMailBuilderEntry(entry) {
+    if (!entry || !entry.anchored || !entry.cell || !entry.textarea) return;
+
+    var cellRect = entry.cell.getBoundingClientRect();
+    var taRect = entry.textarea.getBoundingClientRect();
+    if (!taRect || (taRect.width === 0 && taRect.height === 0)) return;
+
+    var top = Math.round(taRect.top - cellRect.top);
+    var right = Math.round(cellRect.right - taRect.right);
+
+    if (top < 2) top = 2;
+    if (right < 2) right = 2;
+
+    entry.host.style.top = top + 'px';
+    entry.host.style.right = right + 'px';
+  }
+
+  function positionMailBuilderEntry(entry) {
+    if (!entry || entry.anchored) return;
+    if (!entry.host || !entry.textarea) return;
+
+    var textarea = entry.textarea;
+    if (!isVisible(textarea)) {
+      entry.host.style.display = 'none';
+      return;
+    }
+
+    var rect = textarea.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      entry.host.style.display = 'none';
+      return;
+    }
+
+    var buttonWidth = entry.button.offsetWidth || 130;
+    var left = rect.right - buttonWidth - 10;
+    var top = rect.top + 6;
+
+    if (left < 8) left = 8;
+    if (top < 8) top = 8;
+
+    var viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    var maxLeft = viewportWidth - buttonWidth - 8;
+    if (left > maxLeft) left = Math.max(8, maxLeft);
+
+    entry.host.style.display = 'block';
+    entry.host.style.top = top + 'px';
+    entry.host.style.left = left + 'px';
+  }
+
+  function repositionAllMailBuilders() {
+    for (var i = 0; i < state.mailBuilderEntries.length; i++) {
+      positionMailBuilderEntry(state.mailBuilderEntries[i]);
+    }
+  }
+
+  function cleanupMailBuilder() {
+    for (var i = 0; i < state.mailBuilderEntries.length; i++) {
+      var entry = state.mailBuilderEntries[i];
+      if (entry.observer) {
+        try {
+          entry.observer.disconnect();
+        } catch (err) {
+          /* ignore */
+        }
+      }
+      if (entry.host && entry.host.parentElement) {
+        entry.host.parentElement.removeChild(entry.host);
+      }
+      if (entry.cellPositionChanged && entry.cell && entry.cell.style) {
+        entry.cell.style.position = entry.previousCellPosition || '';
+      }
+    }
+    state.mailBuilderEntries = [];
+  }
+
+  function ensureMailBuilderFallbackListeners() {
+    if (state.mailBuilderListening) return;
+    state.mailBuilderListening = true;
+
+    var scheduleReposition = function () {
+      if (state.mailBuilderRepositionTimer) {
+        clearTimeout(state.mailBuilderRepositionTimer);
+      }
+      state.mailBuilderRepositionTimer = setTimeout(function () {
+        state.mailBuilderRepositionTimer = null;
+        repositionAllMailBuilders();
+      }, 60);
+    };
+
+    window.addEventListener('scroll', scheduleReposition, true);
+    window.addEventListener('resize', scheduleReposition);
+
+    var editor = document.getElementById('contact-form-editor');
+    if (editor && typeof MutationObserver !== 'undefined') {
+      try {
+        state.mailBuilderObserver = new MutationObserver(scheduleReposition);
+        state.mailBuilderObserver.observe(editor, {
+          attributes: true,
+          attributeFilter: ['class', 'hidden', 'style'],
+          subtree: true
+        });
+      } catch (err) {
+        state.mailBuilderObserver = null;
+      }
+    }
+  }
+
+  function initMailBuilder() {
+    cleanupMailBuilder();
+
+    if (!isCf7AdminScreen()) return;
+    if (state.settings.mailBuilderEnabled === false) return;
+
+    var targets = adminMailTargets();
+    var needsFallback = false;
+
+    for (var i = 0; i < targets.length; i++) {
+      var entry = createMailBuilderEntry(targets[i]);
+      if (!entry) continue;
+      state.mailBuilderEntries.push(entry);
+      if (!entry.anchored) needsFallback = true;
+    }
+
+    if (needsFallback) ensureMailBuilderFallbackListeners();
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Messaging                                                          */
   /* ------------------------------------------------------------------ */
 
@@ -1446,6 +2023,10 @@ var FONT_BASE = '';
         }
       });
       if (dirty) {
+        if (state.adminMode) {
+          initMailBuilder();
+          return;
+        }
         state.lastSignature = '';
         rescan();
         applySettings();
@@ -1498,6 +2079,12 @@ var FONT_BASE = '';
     }
 
     state.started = true;
+
+    if (isCf7AdminScreen()) {
+      state.adminMode = true;
+      initMailBuilder();
+      return;
+    }
 
     if (/\/wp-admin(\/|$)/i.test(location.pathname)) return;
     if (document.body.classList && document.body.classList.contains('wp-admin')) return;

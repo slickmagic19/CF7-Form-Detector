@@ -138,10 +138,26 @@ input[type="tel"]::placeholder {
 input[type="text"]:focus,
 input[type="email"]:focus,
 input[type="tel"]:focus,
+select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--color-info);
   box-shadow: 0 0 0 3px var(--color-info-muted);
+}
+
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
 }
 
 textarea {

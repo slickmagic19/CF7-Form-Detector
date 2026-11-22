@@ -12,6 +12,7 @@ A Chrome extension that detects **Contact Form 7** forms on the current page and
 - **Popup dashboard** — lists all detected forms with admin URL, CF7 version, field count, and actions.
 - **Real form titles** — looks up the title configured in WordPress via the CF7 REST API when you are logged in; falls back to nearby headings or the form ID.
 - **Prefill test data** — fills first name, last name, email, phone, and message fields. Optionally auto-fills each form once on page load.
+- **Mail body builder (WP admin)** — on the CF7 **Mail** tab, a floating button builds the message body as an HTML `<table>` from the form's available mail-tags (plus a Page URL row and site-title/site-URL footer). It replaces the body and ticks **Use HTML content type**. Works on both Mail and Mail (2), configurable in Options.
 - **WordPress only** — does nothing and injects nothing on non-WordPress sites.
 - **Always on top** — uses the Popover API (Chrome 114+) to render in the browser's top layer, above site widgets and high z-index elements. Falls back to max z-index on older Chrome.
 
@@ -37,6 +38,14 @@ There is no build step — load the folder directly.
 
 The popup footer also links to the full CF7 forms list in the admin.
 
+### Mail body builder (WordPress admin)
+
+1. Open **Contact Form 7 → edit a form → Mail** tab in the WordPress admin.
+2. A floating **Build mail table** button appears at the top-right of the **Message Body** field.
+3. Click it to replace the message body with an HTML table built from the mail-tags available in the form, followed by a `Page URL` row (`[_url]`) and a `([_site_title] [_site_url])` footer. **Use HTML content type** is ticked automatically.
+
+Only tags that CF7 lists as available (the legend above the mail fields) are used, so the table adapts to each form. Use the options to target both mail templates or just one.
+
 ## Options
 
 Open the extension options to configure:
@@ -48,6 +57,8 @@ Open the extension options to configure:
 | **Enable prefill** | Shows Fill buttons in the popup and floating widget. |
 | **Auto-fill forms on page load** | Fills each form once when it appears. Off by default. |
 | **Look up real form titles** | Uses the CF7 REST API for exact titles (requires login with edit permission). |
+| **Build mail tables in the CF7 admin** | Shows the floating build button on the CF7 Mail tab message body. |
+| **Mail templates** | Which message bodies get the build button: Mail and Mail (2), Primary Mail only, or Mail (2) only. |
 | **Show floating CF7 badge** | Toggles the on-page widget. |
 | **Open admin links in a new tab** | New-tab behavior for admin links. |
 

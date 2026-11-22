@@ -13,7 +13,9 @@
     prefillEmail: 'developers@agentimage.com',
     prefillPhone: '1.800.979.5799',
     prefillMessage:
-      "This is a message from Agent Image. We're just checking for possible errors. A response is not needed. Thanks!"
+      "This is a message from Agent Image. We're just checking for possible errors. A response is not needed. Thanks!",
+    mailBuilderEnabled: true,
+    mailBuilderTargets: 'both'
   };
 
   var form = document.getElementById('options-form');
@@ -28,6 +30,8 @@
   var emailInput = document.getElementById('prefillEmail');
   var phoneInput = document.getElementById('prefillPhone');
   var messageInput = document.getElementById('prefillMessage');
+  var mailBuilderEnabledInput = document.getElementById('mailBuilderEnabled');
+  var mailBuilderTargetsInput = document.getElementById('mailBuilderTargets');
   var resetBtn = document.getElementById('reset');
   var statusEl = document.getElementById('status');
 
@@ -59,6 +63,13 @@
     if (emailInput) emailInput.value = s.prefillEmail || '';
     if (phoneInput) phoneInput.value = s.prefillPhone || '';
     if (messageInput) messageInput.value = s.prefillMessage || '';
+    if (mailBuilderEnabledInput) mailBuilderEnabledInput.checked = s.mailBuilderEnabled !== false;
+    if (mailBuilderTargetsInput) {
+      var target = s.mailBuilderTargets === 'mail' || s.mailBuilderTargets === 'mail2'
+        ? s.mailBuilderTargets
+        : 'both';
+      mailBuilderTargetsInput.value = target;
+    }
   }
 
   function read() {
@@ -73,7 +84,9 @@
       prefillLastName: lastNameInput ? lastNameInput.value : '',
       prefillEmail: emailInput ? emailInput.value : '',
       prefillPhone: phoneInput ? phoneInput.value : '',
-      prefillMessage: messageInput ? messageInput.value : ''
+      prefillMessage: messageInput ? messageInput.value : '',
+      mailBuilderEnabled: mailBuilderEnabledInput ? mailBuilderEnabledInput.checked : true,
+      mailBuilderTargets: mailBuilderTargetsInput ? mailBuilderTargetsInput.value : 'both'
     };
   }
 

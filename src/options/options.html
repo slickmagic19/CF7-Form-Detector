@@ -104,6 +104,27 @@
         <input id="autoFill" name="autoFill" type="checkbox" class="switch">
       </section>
 
+      <section class="field row">
+        <div class="field-copy">
+          <label for="mailBuilderEnabled">Build mail tables in the CF7 admin</label>
+          <p class="hint">
+            Adds a floating button to the Contact Form 7 Mail tab message body. It builds an HTML table
+            using only the mail-tags available in the form, plus a Page URL row and a site-title/site-URL footer.
+          </p>
+        </div>
+        <input id="mailBuilderEnabled" name="mailBuilderEnabled" type="checkbox" class="switch">
+      </section>
+
+      <section class="field">
+        <label for="mailBuilderTargets">Mail templates</label>
+        <select id="mailBuilderTargets" name="mailBuilderTargets">
+          <option value="both">Mail and Mail (2)</option>
+          <option value="mail">Primary Mail only</option>
+          <option value="mail2">Mail (2) only</option>
+        </select>
+        <p class="hint">Which message-body fields get the floating build button.</p>
+      </section>
+
       <div class="actions">
         <button type="submit" class="btn primary">Save</button>
         <button type="button" id="reset" class="btn ghost">Reset defaults</button>
