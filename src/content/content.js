@@ -35,7 +35,14 @@
     mailBuilderEntries: [],
     mailBuilderListening: false,
     mailBuilderObserver: null,
-    mailBuilderRepositionTimer: null
+    mailBuilderRepositionTimer: null,
+    listToolsHost: null,
+    listToolsAnchor: null,
+    listToolsTable: null,
+    listToolsObserver: null,
+    listToolsListening: false,
+    listToolsPositionChanged: false,
+    listToolsPreviousPosition: ''
   };
 
   var scanTimer = null;
@@ -1866,6 +1873,290 @@ var FONT_BASE = '';
   }
 
   /* ------------------------------------------------------------------ */
+  /* CF7 forms list tools                                               */
+  /* ------------------------------------------------------------------ */
+
+  function isCf7FormsListScreen() {
+    if (document.getElementById('wpcf7-form')) return false;
+    if (!/(?:^|[?&])page=wpcf7(?:&|$)/.test(location.search)) return false;
+    return !!document.querySelector('.wp-list-table a.row-title');
+  }
+
+  function getVisibleFormTitles() {
+    var container =
+      document.getElementById('the-list') || document.querySelector('.wp-list-table');
+    if (!container) return [];
+
+    var nodes = container.querySelectorAll('a.row-title');
+    var titles = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var title = (nodes[i].textContent || '').replace(/\s+/g, ' ').trim();
+      if (title && titles.indexOf(title) === -1) titles.push(title);
+    }
+    return titles;
+  }
+
+  function getTotalFormPages() {
+    var container = document.querySelector('.tablenav-pages');
+    if (!container) return 1;
+
+    var totalEl = container.querySelector('.total-pages');
+    if (totalEl) {
+      var m = (totalEl.textContent || '').match(/(\d+)/);
+      if (m) {
+        var n = parseInt(m[1], 10);
+        if (n > 0) return n;
+      }
+    }
+
+    var max = 1;
+    var links = container.querySelectorAll('a.page-numbers');
+    for (var i = 0; i < links.length; i++) {
+      var linkNum = parseInt((links[i].textContent || '').trim(), 10);
+      if (!isNaN(linkNum) && linkNum > max) max = linkNum;
+    }
+    return max;
+  }
+
+  function fetchFormTitlesForPage(page) {
+    var url;
+    try {
+      url = new URL(location.href);
+    } catch (err) {
+      return Promise.resolve([]);
+    }
+    url.searchParams.set('paged', String(page));
+
+    return fetch(url.toString(), { credentials: 'same-origin' })
+      .then(function (res) {
+        return res && res.ok ? res.text() : '';
+      })
+      .then(function (html) {
+        if (!html) return [];
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var nodes = doc.querySelectorAll(
+          '#the-list a.row-title, .wp-list-table a.row-title'
+        );
+        var titles = [];
+        for (var i = 0; i < nodes.length; i++) {
+          var title = (nodes[i].textContent || '').replace(/\s+/g, ' ').trim();
+          if (title && titles.indexOf(title) === -1) titles.push(title);
+        }
+        return titles;
+      })
+      .catch(function () {
+        return [];
+      });
+  }
+
+  function getAllFormTitles() {
+    var visible = getVisibleFormTitles();
+    var totalPages = getTotalFormPages();
+    if (totalPages <= 1) return Promise.resolve(visible);
+
+    var pages = [];
+    for (var p = 2; p <= totalPages; p++) pages.push(p);
+
+    return Promise.all(pages.map(fetchFormTitlesForPage)).then(function (results) {
+      var titles = visible.slice();
+      results.forEach(function (pageTitles) {
+        pageTitles.forEach(function (title) {
+          if (titles.indexOf(title) === -1) titles.push(title);
+        });
+      });
+      return titles;
+    });
+  }
+
+  function fallbackCopyText(text) {
+    try {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.top = '-1000px';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(area);
+      return ok;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(
+        function () {
+          return true;
+        },
+        function () {
+          return fallbackCopyText(text);
+        }
+      );
+    }
+    return Promise.resolve(fallbackCopyText(text));
+  }
+
+  function createListToolsEntry() {
+    var host = document.createElement('div');
+    host.id = 'cf7-list-tools-host';
+
+    var shadow = host.attachShadow({ mode: 'open' });
+
+    if (typeof CSSStyleSheet !== 'undefined' && 'adoptedStyleSheets' in shadow) {
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync(MAIL_BUILDER_CSS);
+      shadow.adoptedStyleSheets = [sheet];
+    } else {
+      var style = document.createElement('style');
+      style.textContent = MAIL_BUILDER_CSS;
+      shadow.appendChild(style);
+    }
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cf7-mb';
+
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Copy all form titles');
+    button.title = 'Copy all form titles';
+
+    var icon = document.createElement('span');
+    icon.className = 'cf7-mb-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML =
+      '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect>' +
+      '<path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"></path></svg>';
+
+    var label = document.createElement('span');
+    label.textContent = 'Copy titles';
+
+    button.appendChild(icon);
+    button.appendChild(label);
+    wrap.appendChild(button);
+    shadow.appendChild(wrap);
+
+    var flashTimer = null;
+    var originalLabel = label.textContent;
+
+    function flash(text) {
+      label.textContent = text;
+      if (flashTimer) clearTimeout(flashTimer);
+      flashTimer = setTimeout(function () {
+        label.textContent = originalLabel;
+      }, 1600);
+    }
+
+    button.addEventListener('click', function () {
+      if (button.dataset.busy === '1') return;
+      button.dataset.busy = '1';
+      label.textContent = 'Copying';
+
+      var finish = function (titles) {
+        button.dataset.busy = '0';
+        if (!titles.length) {
+          flash('No titles');
+          return;
+        }
+        copyTextToClipboard(titles.join('\n')).then(function (ok) {
+          flash(ok ? 'Copied' : 'Copy failed');
+        });
+      };
+
+      if (getTotalFormPages() <= 1) {
+        finish(getVisibleFormTitles());
+      } else {
+        getAllFormTitles().then(finish);
+      }
+    });
+
+    return { host: host, button: button, shadow: shadow };
+  }
+
+  function positionListToolsEntry(host, anchor, table) {
+    if (!host || !anchor || !table) return;
+
+    var anchorRect = anchor.getBoundingClientRect();
+    var tableRect = table.getBoundingClientRect();
+    if (!tableRect || (tableRect.width === 0 && tableRect.height === 0)) return;
+
+    var top = Math.round(tableRect.top - anchorRect.top);
+    var right = Math.round(anchorRect.right - tableRect.right) + 10;
+
+    if (top < 4) top = 4;
+    if (right < 4) right = 4;
+
+    host.style.top = top + 'px';
+    host.style.right = right + 'px';
+  }
+
+  function initFormsListTools() {
+    if (state.listToolsHost) return;
+
+    var table = document.querySelector('.wp-list-table');
+    if (!table) return;
+
+    var anchor =
+      table.closest('form') || table.parentElement || document.querySelector('.wrap');
+    if (!anchor || !anchor.style) return;
+
+    var entry = createListToolsEntry();
+    var host = entry.host;
+
+    var previousPosition = anchor.style.position || '';
+    var positionChanged = false;
+    if (!previousPosition) {
+      anchor.style.position = 'relative';
+      positionChanged = true;
+    }
+
+    host.style.cssText =
+      'position:absolute;top:6px;right:10px;z-index:60;margin:0;padding:0;border:0;background:transparent;display:inline-flex;';
+    anchor.appendChild(host);
+
+    state.listToolsHost = host;
+    state.listToolsAnchor = anchor;
+    state.listToolsTable = table;
+    state.listToolsPositionChanged = positionChanged;
+    state.listToolsPreviousPosition = previousPosition;
+
+    positionListToolsEntry(host, anchor, table);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      try {
+        state.listToolsObserver = new ResizeObserver(function () {
+          positionListToolsEntry(
+            state.listToolsHost,
+            state.listToolsAnchor,
+            state.listToolsTable
+          );
+        });
+        state.listToolsObserver.observe(anchor);
+      } catch (err) {
+        state.listToolsObserver = null;
+      }
+    }
+
+    if (!state.listToolsListening) {
+      state.listToolsListening = true;
+      window.addEventListener('resize', function () {
+        if (state.listToolsHost) {
+          positionListToolsEntry(
+            state.listToolsHost,
+            state.listToolsAnchor,
+            state.listToolsTable
+          );
+        }
+      });
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Messaging                                                          */
   /* ------------------------------------------------------------------ */
 
@@ -2083,6 +2374,12 @@ var FONT_BASE = '';
     if (isCf7AdminScreen()) {
       state.adminMode = true;
       initMailBuilder();
+      return;
+    }
+
+    if (isCf7FormsListScreen()) {
+      state.adminMode = true;
+      initFormsListTools();
       return;
     }
 
